@@ -199,17 +199,25 @@ def minutes_until(dep_time_str):
     return diff
 
 
-def build_display_lines(departures):
+def build_display_lines(departures, destination_overrides=None):
     """
-    Format departures into a list of (left_text, right_text) tuples, one
-    per bus. right_text (the wait time) is drawn right-justified against
-    the screen edge; left_text (line number + abbreviated destination) is
-    drawn left-aligned. The destination is trimmed to whatever fits in the
-    remaining space, since it's the least critical piece of information
-    once you know the line number and direction.
+    Format departures into a list of (line_no, dest, wait_str) tuples, one
+    per bus. line_no and dest are meant to be drawn left-aligned (in
+    different colours — see display.draw_departure_row); wait_str is
+    drawn right-justified against the screen edge. dest is trimmed to
+    whatever fits in the remaining space, since it's the least critical
+    piece of information once you know the line number and direction.
+
+    destination_overrides is an optional dict from destinations.load_overrides()
+    mapping a normalised stop name to a curated short name. When a
+    departure's destination matches an entry, that short name is used as
+    the starting point instead of the raw destination — this avoids
+    algorithmic trimming producing odd results like "Shooting Field"
+    becoming "Shoot". Whether or not an override applied, the result is
+    still trimmed further if needed so it's guaranteed to fit the display.
     """
     if not departures:
-        return [("No departures found", ""), ("Next check soon", "")]
+        return [("", "No departures found", ""), ("", "Next check soon", "")]
 
     # Drop buses that departed more than DUE_CUTOFF_MINUTES ago — they're
     # almost certainly gone and just clutter the board. minutes_until()
@@ -224,9 +232,10 @@ def build_display_lines(departures):
         active.append(d)
 
     if not active:
-        return [("No departures found", ""), ("Next check soon", "")]
+        return [("", "No departures found", ""), ("", "Next check soon", "")]
     departures = active
 
+    overrides = destination_overrides or {}
     GAP = 2   # minimum pixel gap between the left and right text blocks
     lines = []
 
@@ -247,7 +256,12 @@ def build_display_lines(departures):
         right_x        = display.W - right_width - 1     # 1px right margin
         max_left_width = right_x - 1 - GAP                # left text starts at x=1
 
-        dest = d["dest"]
+        # Prefer a curated short name from the overrides table, if this
+        # destination has one, before falling back to character trimming.
+        raw_dest = d["dest"]
+        entry = overrides.get(raw_dest.strip().lower()) if raw_dest else None
+        dest  = entry["short_name"] if entry else raw_dest
+
         left_text = (line_no + sep + dest) if dest else line_no
         while dest and display.graphics.measure_text(left_text, 1) > max_left_width:
             dest = dest[:-1]
@@ -256,11 +270,14 @@ def build_display_lines(departures):
         # Safety net: on an unusually long line name (e.g. "Coaster") even
         # line_no alone might not fit. Trim it as a last resort so the
         # left text never collides with the right-justified wait time.
-        while display.graphics.measure_text(left_text, 1) > max_left_width and len(line_no) > 1:
-            line_no   = line_no[:-1]
-            left_text = line_no
+        def _left_width():
+            combined = (line_no + sep + dest) if dest else line_no
+            return display.graphics.measure_text(combined, 1)
 
-        lines.append((left_text, wait_str))
+        while _left_width() > max_left_width and len(line_no) > 1:
+            line_no = line_no[:-1]
+
+        lines.append((line_no, dest, wait_str))
 
     return lines
 

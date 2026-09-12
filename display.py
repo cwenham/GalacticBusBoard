@@ -22,7 +22,6 @@ H        = GalacticUnicorn.HEIGHT   # 11
 LINE_HEIGHT = 10   # vertical pixel spacing between ticker lines (8px font + 2px gap)
 
 graphics.set_font("bitmap8")
-gu.set_brightness(config.BRIGHTNESS)
 
 PEN_BG     = graphics.create_pen(0,   0,   0)
 PEN_YELLOW = graphics.create_pen(255, 200,   0)
@@ -30,6 +29,62 @@ PEN_CYAN   = graphics.create_pen(0,   200, 200)
 PEN_RED    = graphics.create_pen(200,   0,   0)
 PEN_GREEN  = graphics.create_pen(0,   180,  60)
 PEN_WHITE  = graphics.create_pen(160, 160, 160)
+
+
+# ── Brightness (manual + light-sensor auto-dimming) ───────────────────────
+# _base_brightness is the level the user has dialled in with the physical
+# brightness buttons. _is_dark tracks whether the room is currently dark.
+# The brightness actually sent to the hardware is _base_brightness scaled
+# by DARK_DIM_FACTOR while dark. Keeping these separate means dimming for
+# darkness and the user's own brightness preference don't fight each other
+# or drift when the room's light level changes.
+_base_brightness    = config.BRIGHTNESS
+_is_dark            = False
+_last_light_check_ms = None
+
+
+def _apply_brightness():
+    factor = config.DARK_DIM_FACTOR if _is_dark else 1.0
+    level  = max(0.0, min(1.0, _base_brightness * factor))
+    gu.set_brightness(level)
+
+
+_apply_brightness()   # set initial hardware brightness from config.BRIGHTNESS
+
+
+def check_light_level():
+    """
+    Read the onboard light sensor (throttled to config.LIGHT_CHECK_INTERVAL)
+    and enter/exit "dark mode" using hysteresis between DARK_THRESHOLD and
+    LIGHT_RECOVER_THRESHOLD, so the display doesn't flicker between dim and
+    bright when ambient light sits right at one threshold.
+    """
+    global _is_dark, _last_light_check_ms
+
+    now = time.ticks_ms()
+    if (_last_light_check_ms is not None and
+            time.ticks_diff(now, _last_light_check_ms) < config.LIGHT_CHECK_INTERVAL * 1000):
+        return
+    _last_light_check_ms = now
+
+    try:
+        level = gu.light()
+    except Exception as exc:
+        print("Light sensor read error:", exc)
+        return   # leave dark-mode state unchanged on a sensor glitch
+
+    was_dark = _is_dark
+    if _is_dark:
+        if level > config.LIGHT_RECOVER_THRESHOLD:
+            _is_dark = False
+    else:
+        if level < config.DARK_THRESHOLD:
+            _is_dark = True
+
+    if _is_dark != was_dark:
+        print("Light level: {} -> {} dark mode".format(
+            level, "entering" if _is_dark else "leaving"))
+        _apply_brightness()
 
 
 # ── Display helpers ───────────────────────────────────────────────────────
@@ -40,11 +95,24 @@ def clear():
 
 
 def handle_brightness():
-    """Check brightness buttons and adjust if pressed. Call frequently."""
+    """
+    Check brightness buttons and adjust the user's base brightness if
+    pressed (auto-dimming for darkness is layered on top separately — see
+    _apply_brightness). Also checks the light sensor. Call frequently.
+    """
+    global _base_brightness
+
+    changed = False
     if gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_UP):
-        gu.adjust_brightness(0.05)
+        _base_brightness = min(1.0, _base_brightness + 0.05)
+        changed = True
     if gu.is_pressed(GalacticUnicorn.SWITCH_BRIGHTNESS_DOWN):
-        gu.adjust_brightness(-0.05)
+        _base_brightness = max(0.0, _base_brightness - 0.05)
+        changed = True
+    if changed:
+        _apply_brightness()
+
+    check_light_level()
 
 
 # The four stop-select buttons on the left edge, plus the "Zzz" sleep
@@ -149,6 +217,30 @@ def draw_row(left_text, right_text, y, pen):
         graphics.text(right_text, W - rw - 1, y, scale=1)
 
 
+def draw_departure_row(line_no, dest, wait_str, y):
+    """
+    Draw one departure row with each part in its own colour for
+    readability: the bus line number in white, the destination in yellow,
+    and the arrival/wait time right-justified in cyan.
+    """
+    x = 1
+    if line_no:
+        graphics.set_pen(PEN_WHITE)
+        graphics.text(line_no, x, y, scale=1)
+        x += graphics.measure_text(line_no, 1)
+        if dest:
+            x += graphics.measure_text(" ", 1)
+
+    if dest:
+        graphics.set_pen(PEN_YELLOW)
+        graphics.text(dest, x, y, scale=1)
+
+    if wait_str:
+        rw = graphics.measure_text(wait_str, 1)
+        graphics.set_pen(PEN_CYAN)
+        graphics.text(wait_str, W - rw - 1, y, scale=1)
+
+
 def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
     """
     Show a single static (non-scrolling) row, centred vertically, for
@@ -177,7 +269,7 @@ def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
             return None
 
 
-def scroll_lines(lines, pen=PEN_YELLOW, duration_ms=None, pause_ms=None):
+def scroll_lines(lines, duration_ms=None, pause_ms=None):
     """
     Step through `lines` one at a time: hold each one static for `pause_ms`
     (defaults to config.PAUSE_SECONDS), then smoothly scroll up to reveal
@@ -185,8 +277,10 @@ def scroll_lines(lines, pen=PEN_YELLOW, duration_ms=None, pause_ms=None):
     back to the first — that transition is animated exactly like every
     other transition, so there is never a visual jump.
 
-    `lines` is a list of (left_text, right_text) tuples, each already
+    `lines` is a list of (line_no, dest, wait_str) tuples, each already
     guaranteed to fit within the display width (see api.build_display_lines).
+    Each row is drawn with draw_departure_row, colouring line_no, dest,
+    and wait_str differently for readability.
 
     Handles brightness and stop-select buttons throughout; returns the
     pressed key ('A'..'D' or 'SLEEP') if one interrupts the display. Otherwise,
@@ -195,7 +289,7 @@ def scroll_lines(lines, pen=PEN_YELLOW, duration_ms=None, pause_ms=None):
     None, runs forever (until a stop button is pressed).
     """
     if not lines:
-        lines = [("No data", "")]
+        lines = [("", "No data", "")]
     n = len(lines)
 
     if pause_ms is None:
@@ -209,11 +303,11 @@ def scroll_lines(lines, pen=PEN_YELLOW, duration_ms=None, pause_ms=None):
 
     idx = 0
     while True:
-        left, right = lines[idx]
+        line_no, dest, wait_str = lines[idx]
 
         # ── Static phase: hold this line for pause_ms ──────────────────
         clear()
-        draw_row(left, right, y=1, pen=pen)
+        draw_departure_row(line_no, dest, wait_str, y=1)
         gu.update(graphics)
 
         phase_deadline = time.ticks_add(time.ticks_ms(), pause_ms)
@@ -227,12 +321,12 @@ def scroll_lines(lines, pen=PEN_YELLOW, duration_ms=None, pause_ms=None):
 
         # ── Transition phase: scroll up to the next line ───────────────
         nxt = (idx + 1) % n
-        left2, right2 = lines[nxt]
+        line_no2, dest2, wait_str2 = lines[nxt]
 
         for step in range(1, LINE_HEIGHT + 1):
             clear()
-            draw_row(left,  right,  y=1 - step,              pen=pen)
-            draw_row(left2, right2, y=1 - step + LINE_HEIGHT, pen=pen)
+            draw_departure_row(line_no,  dest,  wait_str,  y=1 - step)
+            draw_departure_row(line_no2, dest2, wait_str2, y=1 - step + LINE_HEIGHT)
             gu.update(graphics)
             time.sleep_ms(config.SCROLL_SPEED)
             pressed = handle_buttons()
