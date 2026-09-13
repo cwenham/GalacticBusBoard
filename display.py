@@ -241,6 +241,41 @@ def draw_departure_row(line_no, dest, wait_str, y):
         graphics.text(wait_str, W - rw - 1, y, scale=1)
 
 
+def draw_cache_age_indicator(fraction):
+    """
+    Draw a cache-freshness gauge in the rightmost pixel column: a single
+    green pixel at the top right immediately after a refresh, growing
+    downward to fill the whole column as the cached data approaches
+    poll_interval, shifting from green through yellow to red as it goes.
+
+    fraction: 0.0 (just refreshed) to 1.0 (at or past poll_interval).
+    Drawn as an overlay *after* the row text, in the column that's
+    normally left blank by the 1px right margin the text layout already
+    reserves — so it never displaces or narrows the text area.
+    """
+    fraction = max(0.0, min(1.0, fraction))
+
+    # 1 pixel lit immediately after a refresh, growing to the full column
+    # height (H) as fraction approaches 1.0.
+    lit = 1 + int(fraction * (H - 1))
+    lit = max(1, min(H, lit))
+
+    if fraction <= 0.5:
+        # green -> yellow across the first half
+        t = fraction / 0.5
+        r, g, b = int(255 * t), 200, 0
+    else:
+        # yellow -> red across the second half
+        t = (fraction - 0.5) / 0.5
+        r, g, b = 255, int(200 * (1 - t)), 0
+
+    graphics.set_pen(graphics.create_pen(r, g, b))
+    # A single filled rectangle is much cheaper than setting pixels one at
+    # a time (the PicoGraphics docs note per-pixel drawing is slow), and
+    # this needs to redraw every frame to animate smoothly.
+    graphics.rectangle(W - 1, 0, 1, lit)
+
+
 def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
     """
     Show a single static (non-scrolling) row, centred vertically, for
@@ -269,7 +304,8 @@ def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
             return None
 
 
-def scroll_lines(lines, duration_ms=None, pause_ms=None):
+def scroll_lines(lines, duration_ms=None, pause_ms=None,
+                  cache_last_poll=None, cache_poll_interval=None):
     """
     Step through `lines` one at a time: hold each one static for `pause_ms`
     (defaults to config.PAUSE_SECONDS), then smoothly scroll up to reveal
@@ -281,6 +317,13 @@ def scroll_lines(lines, duration_ms=None, pause_ms=None):
     guaranteed to fit within the display width (see api.build_display_lines).
     Each row is drawn with draw_departure_row, colouring line_no, dest,
     and wait_str differently for readability.
+
+    If cache_last_poll (a time.time() timestamp) and cache_poll_interval
+    (seconds) are both given, a cache-freshness gauge is drawn in the
+    rightmost column after the row text — see draw_cache_age_indicator.
+    Recomputed fresh every frame (in both phases below) so it animates
+    smoothly and stays accurate to real elapsed time even while a line is
+    held static, not just during the scrolling transitions.
 
     Handles brightness and stop-select buttons throughout; returns the
     pressed key ('A'..'D' or 'SLEEP') if one interrupts the display. Otherwise,
@@ -295,6 +338,12 @@ def scroll_lines(lines, duration_ms=None, pause_ms=None):
     if pause_ms is None:
         pause_ms = config.PAUSE_SECONDS * 1000
 
+    show_age = cache_last_poll is not None and cache_poll_interval
+    def age_fraction():
+        if not show_age:
+            return None
+        return (time.time() - cache_last_poll) / cache_poll_interval
+
     deadline = (time.ticks_add(time.ticks_ms(), duration_ms)
                 if duration_ms is not None else None)
 
@@ -306,18 +355,24 @@ def scroll_lines(lines, duration_ms=None, pause_ms=None):
         line_no, dest, wait_str = lines[idx]
 
         # ── Static phase: hold this line for pause_ms ──────────────────
-        clear()
-        draw_departure_row(line_no, dest, wait_str, y=1)
-        gu.update(graphics)
-
+        # Redrawn every tick (not just once) so the cache-age indicator
+        # keeps animating smoothly even while the line itself is static.
         phase_deadline = time.ticks_add(time.ticks_ms(), pause_ms)
-        while time.ticks_diff(phase_deadline, time.ticks_ms()) > 0:
+        while True:
+            clear()
+            draw_departure_row(line_no, dest, wait_str, y=1)
+            if show_age:
+                draw_cache_age_indicator(age_fraction())
+            gu.update(graphics)
+
             pressed = handle_buttons()
             if pressed:
                 return pressed
             time.sleep_ms(20)
             if expired():
                 return None
+            if time.ticks_diff(phase_deadline, time.ticks_ms()) <= 0:
+                break
 
         # ── Transition phase: scroll up to the next line ───────────────
         nxt = (idx + 1) % n
@@ -327,6 +382,8 @@ def scroll_lines(lines, duration_ms=None, pause_ms=None):
             clear()
             draw_departure_row(line_no,  dest,  wait_str,  y=1 - step)
             draw_departure_row(line_no2, dest2, wait_str2, y=1 - step + LINE_HEIGHT)
+            if show_age:
+                draw_cache_age_indicator(age_fraction())
             gu.update(graphics)
             time.sleep_ms(config.SCROLL_SPEED)
             pressed = handle_buttons()

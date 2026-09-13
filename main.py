@@ -221,7 +221,9 @@ def main():
         # recompute the countdown (and poll/re-sync/re-check hours again).
         # A stop button switches immediately; the sleep button forces
         # closed immediately — neither waits for the countdown to finish.
-        pressed = display.scroll_lines(display_lines, duration_ms=config.COUNTDOWN_REFRESH * 1000)
+        pressed = display.scroll_lines(display_lines, duration_ms=config.COUNTDOWN_REFRESH * 1000,
+                                        cache_last_poll=cache_entry["last_poll"],
+                                        cache_poll_interval=poll_interval)
         if pressed == "SLEEP":
             hours_override = toggle_sleep(effective_open)
         elif pressed and pressed != active_stop_key:
