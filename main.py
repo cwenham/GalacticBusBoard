@@ -48,6 +48,7 @@ import config
 import clock
 import display
 import api
+import destinations
 
 
 def connect_wifi():
@@ -122,16 +123,32 @@ def main():
     display.show_status("Clock...", display.PEN_CYAN)
     time_is_synced = clock.sync_time()   # if this fails, we fail open on hours (see clock.is_within_operating_hours)
 
-    poll_interval = api.compute_poll_interval()
+    poll_interval        = api.compute_poll_interval()
+    destination_overrides = destinations.load_overrides()
 
     active_stop_key = config.DEFAULT_STOP_KEY
     stop_cfg         = config.BUS_STOPS[active_stop_key]
     print("Active stop:", active_stop_key, stop_cfg["name"])
 
-    last_poll     = 0
+    # Each stop gets its own cached departures + last-poll timestamp, keyed
+    # by stop letter. Switching stops (A/B/C/D) just changes which cache
+    # entry is being shown — it does NOT force a fresh API call. A stop is
+    # only re-polled once poll_interval has actually elapsed *for that
+    # stop specifically*, same as if you'd left the board sitting on it the
+    # whole time. This matters for the daily quota: repeatedly flicking
+    # between stops (or briefly toggling sleep and un-toggling it) reuses
+    # whatever's already cached instead of spending an extra API call.
+    #
+    # Note this does mean total daily usage scales with how many distinct
+    # stops actually get viewed, since each is polled on its own schedule
+    # once active — compute_poll_interval()'s quota math assumes a single
+    # stop polled continuously all day. If you regularly view all four
+    # stops for meaningful stretches, actual daily calls will run higher
+    # than that calculation alone suggests.
+    stop_cache = {key: {"departures": [], "last_poll": 0} for key in config.BUS_STOPS}
+
     last_ntp_sync = time.time()
-    departures    = []
-    display_lines = [(stop_cfg["name"], ""), ("Loading...", "")]
+    display_lines = [("", stop_cfg["name"] + " - loading...", "")]
 
     # Manual open/closed override, toggled by the Zzz (sleep) button.
     # None = no override, follow the schedule normally. True/False = force
@@ -163,8 +180,13 @@ def main():
         effective_open = hours_override if hours_override is not None else natural_open
 
         # ── Outside effective hours: don't poll, just show the message ──
+        # (Caches are left untouched here rather than cleared: if hours
+        # reopen shortly after — e.g. a brief manual sleep toggle — the
+        # still-fresh cached data is shown immediately rather than forcing
+        # a needless extra API call. After a long closure, the elapsed
+        # time will naturally exceed poll_interval anyway, so the normal
+        # staleness check below still triggers a fresh poll on reopening.)
         if not effective_open:
-            departures = []   # drop stale data so we re-poll fresh on reopening
             pressed = display.show_static(config.OUT_OF_HOURS_MESSAGE,
                                            duration_ms=config.OUT_OF_HOURS_CHECK_INTERVAL * 1000)
             if pressed == "SLEEP":
@@ -174,24 +196,26 @@ def main():
                 if new_key:
                     active_stop_key = new_key
                     stop_cfg        = config.BUS_STOPS[active_stop_key]
-                    last_poll       = 0
             continue
 
-        # Re-check WiFi and poll the API on schedule
-        if now - last_poll >= poll_interval or not departures:
+        cache_entry = stop_cache[active_stop_key]
+
+        # Re-check WiFi and poll the API only if this stop's own cache has
+        # gone stale (or has never been populated) — not on every switch.
+        if now - cache_entry["last_poll"] >= poll_interval or not cache_entry["departures"]:
             wlan = network.WLAN(network.STA_IF)
             if not wlan.isconnected():
                 connect_wifi()
 
             result = api.fetch_departures(stop_cfg["atco"])
             if result is not None:
-                departures = result
-                print("Departures:", departures)
-            last_poll = time.time()
+                cache_entry["departures"] = result
+                print("Departures ({}):".format(active_stop_key), result)
+            cache_entry["last_poll"] = time.time()
 
         # Rebuild the display lines (cheap – no network call) so the
         # "Xm" values stay accurate between API polls
-        display_lines = api.build_display_lines(departures)
+        display_lines = api.build_display_lines(cache_entry["departures"], destination_overrides)
 
         # Scroll for COUNTDOWN_REFRESH seconds, then loop round to
         # recompute the countdown (and poll/re-sync/re-check hours again).
@@ -205,8 +229,10 @@ def main():
             if new_key:
                 active_stop_key = new_key
                 stop_cfg        = config.BUS_STOPS[active_stop_key]
-                departures      = []   # force an immediate re-poll for the new stop
-                last_poll       = 0
+                # No cache reset here — the newly active stop's own cached
+                # data (if any, and if still fresh) is shown as-is. The
+                # staleness check above will fetch automatically if it's
+                # empty or past its own poll_interval.
 
 
 main()
