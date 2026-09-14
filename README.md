@@ -1,5 +1,7 @@
 # Pimoroni Galactic Unicorn Bus Arrival Board for the UK
 
+This is for the [Pimoroni Galactic Unicorn LED matrix display](https://shop.pimoroni.com/products/space-unicorns?variant=40842033561683). It has not been designed for, or tested with the Stellar or Cosmic Unicorn varieties.
+
    * Near-live updates using TransportAPI
    * Displays route number, final stop, and estimated arrival time in minutes with colourised text for easy reading
    * Configure the A, B, C and D buttons to switch between up to four different stops
