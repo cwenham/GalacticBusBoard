@@ -1,11 +1,11 @@
 """
 config.py
 ─────────────────────────────────────────────────────────────────────────────
-Configuration for galactic_bus_board.py
+Configuration for Galactic Unicorn Bus Schedule Board
 
-Edit the values below, then copy both this file and galactic_bus_board.py
+Edit the values below, then copy both this file and other .py files
 to the Pico W (e.g. via Thonny). Keeping credentials here means you can
-share or version-control galactic_bus_board.py without exposing secrets.
+share or version-control the software without exposing secrets.
 ─────────────────────────────────────────────────────────────────────────────
 """
 
