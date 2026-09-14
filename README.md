@@ -1,4 +1,4 @@
-# PiMoroni Galactic Unicorn Bus Arrival Board for the UK
+# Pimoroni Galactic Unicorn Bus Arrival Board for the UK
 
    * Near-live updates using TransportAPI
    * Displays route number, final stop, and estimated arrival time in minutes with colourised text for easy reading
