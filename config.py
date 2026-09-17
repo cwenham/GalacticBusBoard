@@ -1,11 +1,12 @@
 """
 config.py
 ─────────────────────────────────────────────────────────────────────────────
-Configuration for galactic_bus_board.py
+Configuration for the Galactic Bus Board (see main.py).
 
-Edit the values below, then copy both this file and galactic_bus_board.py
-to the Pico W (e.g. via Thonny). Keeping credentials here means you can
-share or version-control galactic_bus_board.py without exposing secrets.
+Edit the values below, then copy this file to the Pico W alongside the
+other modules (e.g. via Thonny) — see main.py's docstring for the full
+file list. Keeping credentials here means you can share or
+version-control the rest of the board's code without exposing secrets.
 ─────────────────────────────────────────────────────────────────────────────
 """
 

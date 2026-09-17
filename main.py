@@ -28,12 +28,15 @@ figures if these seem out of date)
     TRANSPORTAPI_PAID_DAILY_LIMIT in config.py to match your actual quota)
 
 Files
-  main.py     — this file: WiFi connection, stop switching, main event loop
-  config.py   — all user-editable settings (WiFi, API keys, stops, timing)
-  clock.py    — NTP sync, BST calculation, operating-hours window logic
-  display.py  — Galactic Unicorn screen setup, drawing, button handling
-  api.py      — TransportAPI HTTP client and display-line formatting
-Copy all five files to the Pico W; MicroPython auto-runs main.py on boot.
+  main.py         — this file: WiFi connection, stop switching, main event loop
+  config.py       — all user-editable settings (WiFi, API keys, stops, timing)
+  clock.py        — NTP sync, BST calculation, operating-hours window logic
+  display.py      — Galactic Unicorn screen setup, drawing, button handling
+  api.py          — TransportAPI HTTP client and display-line formatting
+  destinations.py — loads destinations.csv, the short-name override table
+Copy all six files to the Pico W, plus destinations.csv itself if you're
+using short-name overrides (without it the board falls back to purely
+algorithmic trimming). MicroPython auto-runs main.py on boot.
 
 Wiring / hardware
   No extra wiring needed. A/B/C/D switch bus stops; Zzz toggles sleep;
