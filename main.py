@@ -201,8 +201,17 @@ def main():
         cache_entry = stop_cache[active_stop_key]
 
         # Re-check WiFi and poll the API only if this stop's own cache has
-        # gone stale (or has never been populated) — not on every switch.
-        if now - cache_entry["last_poll"] >= poll_interval or not cache_entry["departures"]:
+        # gone stale, or has never successfully been polled at all.
+        #
+        # Note: this checks last_poll == 0 (the initial sentinel), NOT
+        # "not cache_entry['departures']". A successful poll can quite
+        # legitimately return an empty list (a real gap between scheduled
+        # buses), and treating that as "cache not populated" would force
+        # a fresh fetch every single loop iteration until a non-empty
+        # result eventually came back — silently bypassing poll_interval
+        # and burning through the daily quota well beyond what the
+        # calculated interval intends.
+        if cache_entry["last_poll"] == 0 or now - cache_entry["last_poll"] >= poll_interval:
             wlan = network.WLAN(network.STA_IF)
             if not wlan.isconnected():
                 connect_wifi()
