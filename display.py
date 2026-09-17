@@ -276,7 +276,7 @@ def draw_cache_age_indicator(fraction):
     graphics.rectangle(W - 1, 0, 1, lit)
 
 
-def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
+def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None, dim=False):
     """
     Show a single static (non-scrolling) row, centred vertically, for
     duration_ms milliseconds — or indefinitely if duration_ms is None.
@@ -288,20 +288,34 @@ def show_static(left_text, right_text="", pen=PEN_WHITE, duration_ms=None):
     The frame is redrawn on every tick (not just once up front) so that a
     brightness-button press takes effect on the display immediately,
     rather than only becoming visible once duration_ms finally elapses.
+
+    dim=True forces the display down to config.SLEEP_DIM_BRIGHTNESS —
+    "just about visible" — for as long as this call runs, regardless of
+    the user's normal brightness setting. Used for the out-of-hours / Zzz
+    (sleep) screen. The normal computed brightness (base level, further
+    adjusted for ambient darkness) is restored on every way out of this
+    function — a button press, the timeout, or nothing at all if dim was
+    never requested.
     """
     deadline = (time.ticks_add(time.ticks_ms(), duration_ms)
                 if duration_ms is not None else None)
-    while True:
-        clear()
-        draw_row(left_text, right_text, y=1, pen=pen)
-        gu.update(graphics)
+    try:
+        while True:
+            clear()
+            draw_row(left_text, right_text, y=1, pen=pen)
+            if dim:
+                gu.set_brightness(config.SLEEP_DIM_BRIGHTNESS)
+            gu.update(graphics)
 
-        pressed = handle_buttons()
-        if pressed:
-            return pressed
-        time.sleep_ms(50)
-        if deadline is not None and time.ticks_diff(deadline, time.ticks_ms()) <= 0:
-            return None
+            pressed = handle_buttons()
+            if pressed:
+                return pressed
+            time.sleep_ms(50)
+            if deadline is not None and time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                return None
+    finally:
+        if dim:
+            _apply_brightness()   # restore the user's normal (base × dark-factor) level
 
 
 def scroll_lines(lines, duration_ms=None, pause_ms=None,

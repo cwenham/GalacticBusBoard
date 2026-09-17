@@ -69,6 +69,25 @@ def connect_wifi():
     time.sleep(0.8)
 
 
+def disconnect_wifi():
+    """
+    Power down the WiFi radio between polls. On a Pico W the radio draws
+    meaningful current just sitting idle-connected — with poll_interval
+    often several minutes, leaving it connected the whole time between
+    fetches wastes a lot of battery for no benefit, since display refreshes
+    use only the locally cached departures. Safe to call even if already
+    disconnected; connect_wifi() fully re-activates and reconnects when
+    next needed.
+    """
+    wlan = network.WLAN(network.STA_IF)
+    try:
+        if wlan.isconnected():
+            wlan.disconnect()
+        wlan.active(False)
+    except Exception as exc:
+        print("WiFi disconnect error (continuing):", exc)
+
+
 def validate_bus_stops():
     """
     Warn at startup (via the serial log) about any configured stop that
@@ -161,13 +180,6 @@ def main():
     while True:
         now = time.time()
 
-        # Periodically re-sync the clock to correct for RTC drift, and to
-        # recover if the initial sync at boot failed
-        if time.time() - last_ntp_sync >= config.NTP_RESYNC_INTERVAL:
-            if clock.sync_time():
-                time_is_synced = True
-                last_ntp_sync  = time.time()
-
         natural_open = clock.is_within_operating_hours(time_is_synced)
 
         # If the real schedule has flipped since we last checked, drop any
@@ -179,16 +191,52 @@ def main():
 
         effective_open = hours_override if hours_override is not None else natural_open
 
+        cache_entry = stop_cache[active_stop_key]
+
+        # Work out up front whether WiFi is needed at all this cycle —
+        # either the clock needs a resync, or (while open) the active
+        # stop's own cache has gone stale. At most one connect/disconnect
+        # cycle happens per loop iteration even if both are due, since
+        # both network operations share the same "WiFi up" window below.
+        ntp_due  = time.time() - last_ntp_sync >= config.NTP_RESYNC_INTERVAL
+        poll_due = effective_open and (
+            cache_entry["last_poll"] == 0 or now - cache_entry["last_poll"] >= poll_interval)
+
+        if ntp_due or poll_due:
+            connect_wifi()   # no-op if already connected
+
+            if ntp_due:
+                if clock.sync_time():
+                    time_is_synced = True
+                    last_ntp_sync  = time.time()
+
+            if poll_due:
+                # Note: this checks last_poll == 0 (the initial sentinel),
+                # NOT "not cache_entry['departures']". A successful poll
+                # can quite legitimately return an empty list (a real gap
+                # between scheduled buses), and treating that as "cache
+                # not populated" would force a fresh fetch every loop
+                # iteration until a non-empty result eventually came back
+                # — bypassing poll_interval and burning the daily quota.
+                result = api.fetch_departures(stop_cfg["atco"])
+                if result is not None:
+                    cache_entry["departures"] = result
+                    print("Departures ({}):".format(active_stop_key), result)
+                cache_entry["last_poll"] = time.time()
+
+            disconnect_wifi()
+
         # ── Outside effective hours: don't poll, just show the message ──
         # (Caches are left untouched here rather than cleared: if hours
         # reopen shortly after — e.g. a brief manual sleep toggle — the
         # still-fresh cached data is shown immediately rather than forcing
         # a needless extra API call. After a long closure, the elapsed
-        # time will naturally exceed poll_interval anyway, so the normal
-        # staleness check below still triggers a fresh poll on reopening.)
+        # time will naturally exceed poll_interval anyway, so poll_due
+        # above will trigger a fresh poll on reopening as usual.)
         if not effective_open:
             pressed = display.show_static(config.OUT_OF_HOURS_MESSAGE,
-                                           duration_ms=config.OUT_OF_HOURS_CHECK_INTERVAL * 1000)
+                                           duration_ms=config.OUT_OF_HOURS_CHECK_INTERVAL * 1000,
+                                           dim=True)
             if pressed == "SLEEP":
                 hours_override = toggle_sleep(effective_open)
             elif pressed and pressed != active_stop_key:
@@ -198,30 +246,6 @@ def main():
                     stop_cfg        = config.BUS_STOPS[active_stop_key]
             continue
 
-        cache_entry = stop_cache[active_stop_key]
-
-        # Re-check WiFi and poll the API only if this stop's own cache has
-        # gone stale, or has never successfully been polled at all.
-        #
-        # Note: this checks last_poll == 0 (the initial sentinel), NOT
-        # "not cache_entry['departures']". A successful poll can quite
-        # legitimately return an empty list (a real gap between scheduled
-        # buses), and treating that as "cache not populated" would force
-        # a fresh fetch every single loop iteration until a non-empty
-        # result eventually came back — silently bypassing poll_interval
-        # and burning through the daily quota well beyond what the
-        # calculated interval intends.
-        if cache_entry["last_poll"] == 0 or now - cache_entry["last_poll"] >= poll_interval:
-            wlan = network.WLAN(network.STA_IF)
-            if not wlan.isconnected():
-                connect_wifi()
-
-            result = api.fetch_departures(stop_cfg["atco"])
-            if result is not None:
-                cache_entry["departures"] = result
-                print("Departures ({}):".format(active_stop_key), result)
-            cache_entry["last_poll"] = time.time()
-
         # Rebuild the display lines (cheap – no network call) so the
         # "Xm" values stay accurate between API polls
         display_lines = api.build_display_lines(cache_entry["departures"], destination_overrides)
@@ -230,6 +254,9 @@ def main():
         # recompute the countdown (and poll/re-sync/re-check hours again).
         # A stop button switches immediately; the sleep button forces
         # closed immediately — neither waits for the countdown to finish.
+        # WiFi is off throughout this whole wait (see above) since only
+        # the locally cached departures are needed to keep the display
+        # updated during it.
         pressed = display.scroll_lines(display_lines, duration_ms=config.COUNTDOWN_REFRESH * 1000,
                                         cache_last_poll=cache_entry["last_poll"],
                                         cache_poll_interval=poll_interval)
@@ -242,8 +269,8 @@ def main():
                 stop_cfg        = config.BUS_STOPS[active_stop_key]
                 # No cache reset here — the newly active stop's own cached
                 # data (if any, and if still fresh) is shown as-is. The
-                # staleness check above will fetch automatically if it's
-                # empty or past its own poll_interval.
+                # poll_due check above will fetch automatically next cycle
+                # if it's empty or past its own poll_interval.
 
 
 main()

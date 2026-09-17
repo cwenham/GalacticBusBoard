@@ -1,11 +1,11 @@
 """
 config.py
 ─────────────────────────────────────────────────────────────────────────────
-Configuration for Galactic Unicorn Bus Schedule Board
+Configuration for galactic_bus_board.py
 
-Edit the values below, then copy both this file and other .py files
+Edit the values below, then copy both this file and galactic_bus_board.py
 to the Pico W (e.g. via Thonny). Keeping credentials here means you can
-share or version-control the software without exposing secrets.
+share or version-control galactic_bus_board.py without exposing secrets.
 ─────────────────────────────────────────────────────────────────────────────
 """
 
@@ -93,3 +93,35 @@ OUT_OF_HOURS_CHECK_INTERVAL = 300   # seconds (5 minutes)
 # How often to re-sync the Pico's clock against an NTP server, to correct
 # for RTC drift on long-running deployments.
 NTP_RESYNC_INTERVAL = 21600   # seconds (6 hours)
+
+# ── Auto-dimming (onboard light sensor) ───────────────────────────────────
+# The Galactic Unicorn has a built-in phototransistor; gu.light() returns a
+# raw reading from 0 (dark) to 4095 (bright). When it drops below
+# DARK_THRESHOLD, the display dims to BRIGHTNESS * DARK_DIM_FACTOR. It only
+# brightens back up once the reading rises above LIGHT_RECOVER_THRESHOLD —
+# that gap (rather than a single threshold) stops the display flickering
+# between dim/bright if the ambient light hovers right at the boundary.
+#
+# These defaults are a starting guess, not a measured calibration — the
+# sensor's real-world readings depend heavily on where the board is mounted
+# (behind a diffuser, near a window, etc). Watch the serial log for lines
+# like "Light level: 812 -> entering dark mode" to see actual readings in
+# your setup and adjust the thresholds accordingly.
+DARK_THRESHOLD          = 50    # below this: dim the display
+LIGHT_RECOVER_THRESHOLD = 150   # above this: return to full brightness
+DARK_DIM_FACTOR         = 0.5   # brightness multiplier while dark (0.5 = half)
+LIGHT_CHECK_INTERVAL    = 5     # seconds between light-sensor reads
+
+# How dim the out-of-hours / Zzz (sleep) screen should be — deliberately
+# much lower than DARK_DIM_FACTOR, since this is a "barely visible, don't
+# light up the room" state rather than just a slightly-dimmer display.
+SLEEP_DIM_BRIGHTNESS = 0.03
+
+# ── Destination short-name overrides ──────────────────────────────────────
+# Path (on the Pico's filesystem) to a CSV file of curated short names for
+# destinations that abbreviate awkwardly on their own (e.g. "Shooting
+# Field" trimming down to just "Shoot"). Columns: ID (integer), Stop Name,
+# Short Name — a header row is optional. See destinations.py for the
+# loader and destinations.csv for an example. If the file is missing, the
+# board falls back to purely algorithmic pixel-fit trimming as before.
+DESTINATION_OVERRIDES_CSV = "destinations.csv"
