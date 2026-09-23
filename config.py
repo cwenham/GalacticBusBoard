@@ -118,6 +118,22 @@ LIGHT_CHECK_INTERVAL    = 5     # seconds between light-sensor reads
 # light up the room" state rather than just a slightly-dimmer display.
 SLEEP_DIM_BRIGHTNESS = 0.03
 
+# ── Battery-life logging (temporary experiment) ───────────────────────────
+# Appends a heartbeat line to a file on the Pico's flash every
+# BATTERY_LOG_INTERVAL seconds, so a board running unattended on battery
+# still records when it died — the last line in the log is the time of
+# death. Also prints the tail of the previous run to the serial console at
+# boot, so plugging a dead board into USB immediately shows when it stopped.
+#
+# This exists to measure what the WiFi power-down change bought, and is
+# meant to be switched off again afterwards. The log is only ever appended
+# to, never truncated, so powering a dead board back up doesn't erase the
+# result you were trying to capture — delete the file by hand between runs
+# if you want a clean one.
+BATTERY_LOG_ENABLED  = True
+BATTERY_LOG_PATH     = "battery_log.txt"
+BATTERY_LOG_INTERVAL = 300   # seconds between heartbeat lines (5 minutes)
+
 # ── Destination short-name overrides ──────────────────────────────────────
 # Path (on the Pico's filesystem) to a CSV file of curated short names for
 # destinations that abbreviate awkwardly on their own (e.g. "Shooting

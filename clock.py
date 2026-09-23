@@ -84,6 +84,33 @@ def uk_local_minutes():
     return hour * 60 + minute
 
 
+def uk_local_tuple():
+    """
+    Return the current time as a UK-local time tuple, applying the BST
+    offset by adding an hour to the epoch value rather than to the hour
+    field — so a shift across midnight rolls the date correctly too.
+    (uk_local_minutes() above applies the same offset, but only ever needs
+    minutes-since-midnight, where the date rollover doesn't matter.)
+    """
+    t = time.localtime()
+    if is_bst(t):
+        t = time.localtime(time.mktime(t) + 3600)
+    return t
+
+
+def timestamp_str():
+    """
+    UK local time as "YYYY-MM-DD HH:MM:SS", for log lines.
+
+    Note this is only meaningful once NTP has synced — before that the RTC
+    reads from its power-on epoch, so callers that might run pre-sync
+    should record whether the clock was synced alongside the timestamp.
+    """
+    t = uk_local_tuple()
+    return "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
+        t[0], t[1], t[2], t[3], t[4], t[5])
+
+
 def parse_hhmm(s):
     """Parse an "HH:MM" string into minutes-since-midnight."""
     h, m = s.split(":")

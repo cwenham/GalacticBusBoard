@@ -87,6 +87,19 @@ def check_light_level():
         _apply_brightness()
 
 
+def is_dark():
+    """Whether the light sensor currently has the board in dark mode."""
+    return _is_dark
+
+
+def base_brightness():
+    """
+    The user's dialled-in brightness, before any dark-mode or sleep-screen
+    scaling is applied (see _apply_brightness).
+    """
+    return _base_brightness
+
+
 # ── Display helpers ───────────────────────────────────────────────────────
 
 def clear():

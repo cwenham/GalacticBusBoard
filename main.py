@@ -52,6 +52,7 @@ import clock
 import display
 import api
 import destinations
+import powerlog
 
 
 def connect_wifi():
@@ -139,14 +140,18 @@ def toggle_sleep(effective_open):
 
 def main():
     print("Galactic Bus Board starting")
+    powerlog.report_last_run()   # surfaces when a previous battery run ended
     validate_bus_stops()
     connect_wifi()
 
     display.show_status("Clock...", display.PEN_CYAN)
     time_is_synced = clock.sync_time()   # if this fails, we fail open on hours (see clock.is_within_operating_hours)
 
+    powerlog.log_boot(time_is_synced)
+
     poll_interval        = api.compute_poll_interval()
     destination_overrides = destinations.load_overrides()
+    poll_count            = 0   # cumulative API polls, recorded in the battery log
 
     active_stop_key = config.DEFAULT_STOP_KEY
     stop_cfg         = config.BUS_STOPS[active_stop_key]
@@ -194,6 +199,12 @@ def main():
 
         effective_open = hours_override if hours_override is not None else natural_open
 
+        # Heartbeat before the out-of-hours branch below, which `continue`s
+        # past the rest of the loop — the overnight closed stretch is
+        # exactly the period the battery log most needs to cover.
+        powerlog.heartbeat(effective_open, display.is_dark(),
+                           display.base_brightness(), poll_count)
+
         cache_entry = stop_cache[active_stop_key]
 
         # Work out up front whether WiFi is needed at all this cycle —
@@ -222,6 +233,7 @@ def main():
                 # iteration until a non-empty result eventually came back
                 # — bypassing poll_interval and burning the daily quota.
                 result = api.fetch_departures(stop_cfg["atco"])
+                poll_count += 1
                 if result is not None:
                     cache_entry["departures"] = result
                     print("Departures ({}):".format(active_stop_key), result)
