@@ -134,6 +134,20 @@ BATTERY_LOG_ENABLED  = True
 BATTERY_LOG_PATH     = "battery_log.txt"
 BATTERY_LOG_INTERVAL = 300   # seconds between heartbeat lines (5 minutes)
 
+# ── Battery fuel gauge (optional) ─────────────────────────────────────────
+# If an LC709203F fuel gauge (e.g. Adafruit's breakout) is plugged into the
+# Qw/ST connector, it's detected at boot and its readings — cell voltage and
+# estimated state of charge — are added to each battery-log heartbeat. With
+# no gauge attached, nothing changes.
+#
+# FUEL_GAUGE_PACK_MAH tunes the chip's charge model. The LC709203F is only
+# characterised for packs up to 3000 mAh; above that its largest setting is
+# used and the log marks soc as approximate. vbat is a direct measurement
+# and is accurate regardless. The gauge only handles a single-cell voltage,
+# so a multi-cell pack must be wired in parallel, never series.
+FUEL_GAUGE_ENABLED  = True
+FUEL_GAUGE_PACK_MAH = 13400   # 4× 18650 Li-ion in parallel (1S4P)
+
 # ── Destination short-name overrides ──────────────────────────────────────
 # Path (on the Pico's filesystem) to a CSV file of curated short names for
 # destinations that abbreviate awkwardly on their own (e.g. "Shooting

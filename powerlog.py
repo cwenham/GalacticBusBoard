@@ -101,7 +101,7 @@ def report_last_run():
         print("   ", ln)
 
 
-def log_boot(time_is_synced):
+def log_boot(time_is_synced, extra=""):
     """
     Record a boot marker. Distinguishing a restart from a continuous run is
     what lets you tell "the battery died" from "it browned out and came
@@ -109,17 +109,19 @@ def log_boot(time_is_synced):
 
     Note the clock is only meaningful here if NTP has already synced, hence
     the flag in the line — an unsynced boot timestamp is near the epoch and
-    should not be mistaken for a real time.
+    should not be mistaken for a real time. `extra` is appended verbatim
+    (e.g. the fuel gauge's startup status).
     """
     if not config.BATTERY_LOG_ENABLED:
         return
     _update_uptime()
     _write("")   # blank line: visually separates runs in the file
-    _write(_format("BOOT", "clock={}".format(
-        "synced" if time_is_synced else "UNSYNCED — timestamp unreliable")))
+    fields = "clock={}".format(
+        "synced" if time_is_synced else "UNSYNCED — timestamp unreliable")
+    _write(_format("BOOT", fields + (" " + extra if extra else "")))
 
 
-def heartbeat(in_hours, is_dark, brightness, poll_count):
+def heartbeat(in_hours, is_dark, brightness, poll_count, extra=None):
     """
     Append a heartbeat if config.BATTERY_LOG_INTERVAL has elapsed.
 
@@ -128,6 +130,11 @@ def heartbeat(in_hours, is_dark, brightness, poll_count):
     fields are logged because they drive power draw: a night spent dimmed
     and out-of-hours costs far less than a day at full brightness, so a
     run's duration means little without knowing the mix.
+
+    `extra` is an optional zero-argument callable returning more fields
+    (e.g. fuelgauge.describe). It's passed uncalled and only invoked when a
+    line is actually written — so a sensor behind it is read once per
+    heartbeat, not on every main-loop tick in between.
     """
     global _last_written_ms
 
@@ -142,8 +149,10 @@ def heartbeat(in_hours, is_dark, brightness, poll_count):
         return
     _last_written_ms = now
 
-    _write(_format("HEARTBEAT", "hours={} dark={} bright={:.2f} polls={}".format(
+    fields = "hours={} dark={} bright={:.2f} polls={}".format(
         "open" if in_hours else "closed",
         "yes" if is_dark else "no",
         brightness,
-        poll_count)))
+        poll_count)
+    more = extra() if extra else ""
+    _write(_format("HEARTBEAT", fields + (" " + more if more else "")))

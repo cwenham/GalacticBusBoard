@@ -53,6 +53,7 @@ import display
 import api
 import destinations
 import powerlog
+import fuelgauge
 
 
 def connect_wifi():
@@ -141,13 +142,14 @@ def toggle_sleep(effective_open):
 def main():
     print("Galactic Bus Board starting")
     powerlog.report_last_run()   # surfaces when a previous battery run ended
+    gauge_status = fuelgauge.init()   # before WiFi: see fuelgauge.init() for why
     validate_bus_stops()
     connect_wifi()
 
     display.show_status("Clock...", display.PEN_CYAN)
     time_is_synced = clock.sync_time()   # if this fails, we fail open on hours (see clock.is_within_operating_hours)
 
-    powerlog.log_boot(time_is_synced)
+    powerlog.log_boot(time_is_synced, "gauge=" + gauge_status)
 
     poll_interval        = api.compute_poll_interval()
     destination_overrides = destinations.load_overrides()
@@ -203,7 +205,8 @@ def main():
         # past the rest of the loop — the overnight closed stretch is
         # exactly the period the battery log most needs to cover.
         powerlog.heartbeat(effective_open, display.is_dark(),
-                           display.base_brightness(), poll_count)
+                           display.base_brightness(), poll_count,
+                           fuelgauge.describe)
 
         cache_entry = stop_cache[active_stop_key]
 
